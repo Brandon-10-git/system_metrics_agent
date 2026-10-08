@@ -1,0 +1,144 @@
+name: CI-CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Droits minimaux par défaut (principe du moindre privilège)
+permissions:
+  contents: read
+
+# Annule les exécutions obsolètes d'une même branche
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: true
+
+# Les actions sont figées par SHA de commit (et non par tag) : un tag peut être
+# réécrit par un attaquant (cf. compromission de trivy-action en mars 2026).
+# Le commentaire indique la version correspondante ; Dependabot les met à jour.
+
+jobs:
+  # ===========================================================================
+  # JOB 1 : tests + couverture + SonarQube + Quality Gate
+  # ===========================================================================
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout (historique complet requis par SonarQube)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Installer Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-*.txt
+
+      - name: Installer les dépendances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Tests + couverture (coverage.xml)
+        run: pytest -q --cov=app --cov-report=xml --cov-report=term-missing
+
+      - name: Analyse SonarQube
+        uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+      - name: Quality Gate (échec du pipeline si la porte qualité n'est pas validée)
+        uses: SonarSource/sonarqube-quality-gate-action@7a5fffe8e523c40e0c740b6bc2712ab503e52efa # v1.2.1
+        timeout-minutes: 5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+  # ===========================================================================
+  # JOB 2 : build -> scan Trivy -> push (une instance par image : api et agent)
+  # ===========================================================================
+  build-scan-push:
+    needs: test
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write   # pour publier le rapport SARIF (bonus)
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [api, agent]
+    env:
+      LOCAL_IMAGE: metrics-${{ matrix.component }}:${{ github.sha }}
+      # On ne pousse que sur un push vers main, jamais sur une pull request
+      DO_PUSH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Connexion à Docker Hub
+        if: env.DO_PUSH == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build local (sans push)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Dockerfile.${{ matrix.component }}
+          push: false
+          load: true
+          tags: ${{ env.LOCAL_IMAGE }}
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
+
+      - name: Scan Trivy (bloquant si HIGH/CRITICAL corrigeable)
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: ${{ env.LOCAL_IMAGE }}
+          format: table
+          exit-code: "1"
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true      # ne bloque que ce qui a un correctif disponible
+          vuln-type: os,library
+
+      # --- BONUS : rapport SARIF dans l'onglet Security (même si le scan a échoué) ---
+      - name: Trivy -> rapport SARIF
+        if: always()
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: ${{ env.LOCAL_IMAGE }}
+          format: sarif
+          output: trivy-${{ matrix.component }}.sarif
+          exit-code: "0"
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+
+      - name: Publier le SARIF dans l'onglet Security
+        if: always()
+        continue-on-error: true   # indisponible sur dépôt privé sans GitHub Advanced Security
+        uses: github/codeql-action/upload-sarif@88585263c0627ee42c0e1c5143a112c8d6f4aa18 # v4.38.2
+        with:
+          sarif_file: trivy-${{ matrix.component }}.sarif
+          category: trivy-${{ matrix.component }}
+
+      - name: Push sur Docker Hub (tags SHA + latest)
+        if: env.DO_PUSH == 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Dockerfile.${{ matrix.component }}
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/system-metrics-${{ matrix.component }}:${{ github.sha }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/system-metrics-${{ matrix.component }}:latest
+          cache-from: type=gha,scope=${{ matrix.component }}
