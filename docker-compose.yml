@@ -1,0 +1,38 @@
+# Lancement local complet :  docker compose up --build
+# Vérification :             curl http://localhost:8000/metrics/latest
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    image: system-metrics-api:local
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    # Durcissement : racine en lecture seule, aucune capability Linux, pas d'élévation
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    # Le HEALTHCHECK est défini dans Dockerfile.api et sert à "depends_on" ci-dessous.
+
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    image: system-metrics-agent:local
+    depends_on:
+      api:
+        condition: service_healthy   # l'agent attend que l'API réponde sur /health
+    environment:
+      # Les conteneurs se joignent par le NOM du service (DNS interne de Compose).
+      # 127.0.0.1 ici désignerait l'agent lui-même : ça ne marcherait pas.
+      METRICS_ENDPOINT: http://api:8000/metrics
+      # Compose lit automatiquement le fichier .env (non versionné) pour ces valeurs.
+      COLLECTION_INTERVAL: ${COLLECTION_INTERVAL:-5}
+      REQUEST_TIMEOUT: ${REQUEST_TIMEOUT:-5}
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
