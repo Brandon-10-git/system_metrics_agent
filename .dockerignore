@@ -1,1 +1,25 @@
+# Contrôle de version et CI
+.git
+.github
+
+# Secrets et configuration locale : JAMAIS dans une image
 .env
+.env.*
+
+# Environnements virtuels et caches Python
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.coverage
+coverage.xml
+.scannerwork
+
+# Tests, docs et fichiers d'infrastructure : inutiles à l'exécution
+tests
+*.md
+Dockerfile*
+docker-compose*.yml
+requirements-dev.txt
+scripts

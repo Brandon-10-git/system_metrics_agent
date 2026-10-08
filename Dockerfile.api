@@ -1,0 +1,56 @@
+# syntax=docker/dockerfile:1
+# =============================================================================
+# Image de PRODUCTION de l'API (FastAPI + uvicorn)
+# Build :  docker build -f Dockerfile.api -t system-metrics-api .
+# =============================================================================
+
+# Tag précis (jamais "latest") : le build est reproductible.
+# "slim" = Debian minimal ; "bookworm" = version de Debian explicite.
+ARG PYTHON_IMAGE=python:3.12.13-slim-bookworm
+
+# ---------- Étape 1 : "builder" -> installe les dépendances ----------
+FROM ${PYTHON_IMAGE} AS builder
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Environnement virtuel isolé : on le copiera tel quel dans l'image finale.
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# On copie UNIQUEMENT la liste des dépendances avant le code :
+# tant qu'elle ne change pas, Docker réutilise la couche en cache.
+COPY requirements-api.txt .
+RUN pip install --no-cache-dir -r requirements-api.txt
+
+# ---------- Étape 2 : image finale (sans cache pip, sans outils de build) ----------
+FROM ${PYTHON_IMAGE} AS final
+
+LABEL org.opencontainers.image.title="system-metrics-api" \
+      org.opencontainers.image.description="API FastAPI de réception des métriques système" \
+      org.opencontainers.image.source="https://github.com/Mficius/system_metrics_agent"
+
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# Utilisateur non-root (UID fixe : utile pour Kubernetes / racine en lecture seule)
+RUN groupadd --system --gid 10001 app \
+ && useradd  --system --uid 10001 --gid app --no-create-home \
+             --shell /usr/sbin/nologin app
+
+COPY --from=builder /opt/venv /opt/venv
+
+WORKDIR /app
+COPY --chown=app:app app/ ./app/
+
+USER app
+
+EXPOSE 8000
+
+# Pas de curl dans l'image : on utilise Python (déjà présent) pour sonder /health.
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+  CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+
+# Production : pas de --reload ; --host 0.0.0.0 pour être joignable hors du conteneur.
+CMD ["uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8000"]
