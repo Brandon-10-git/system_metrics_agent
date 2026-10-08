@@ -1,0 +1,3 @@
+# Dépendances d'exécution de l'API (image Docker de l'API)
+fastapi==0.142.2
+uvicorn[standard]==0.54.0
