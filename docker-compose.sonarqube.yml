@@ -1,8 +1,4 @@
-# BONUS : SonarQube local.   docker compose -f docker-compose.sonarqube.yml up -d
-# Interface : http://localhost:9000  (identifiants initiaux admin / admin, à changer)
-# Linux : sudo sysctl -w vm.max_map_count=524288   (requis par Elasticsearch)
-# ATTENTION : un SonarQube local n'est PAS joignable depuis les runners GitHub.
-#             Pour le pipeline, utilisez SonarQube Cloud ou un serveur exposé.
+
 services:
   sonarqube:
     image: sonarqube:community
