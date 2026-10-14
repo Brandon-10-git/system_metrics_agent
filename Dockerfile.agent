@@ -1,0 +1,59 @@
+# syntax=docker/dockerfile:1
+# =============================================================================
+# Image de PRODUCTION de l'agent de collecte (psutil + requests)
+# Build :  docker build -f Dockerfile.agent -t system-metrics-agent .
+# =============================================================================
+
+ARG PYTHON_IMAGE=python:3.12.13-slim-bookworm
+
+# ---------- Étape 1 : "builder" ----------
+FROM ${PYTHON_IMAGE} AS builder
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# psutil, requests et python-dotenv publient des "wheels" binaires :
+# aucun compilateur (gcc) n'est nécessaire, donc rien à nettoyer ensuite.
+COPY requirements-agent.txt .
+RUN pip install --no-cache-dir -r requirements-agent.txt
+
+# ---------- Étape 2 : image finale ----------
+FROM ${PYTHON_IMAGE} AS final
+
+LABEL org.opencontainers.image.title="system-metrics-agent" \
+      org.opencontainers.image.description="Agent de collecte CPU/RAM/charge système" \
+      org.opencontainers.image.source="https://github.com/Mficius/system_metrics_agent"
+
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# collector.py exécute la commande `uptime` via subprocess. L'image "slim" ne la
+# contient PAS : elle est fournie par le paquet Debian "procps".
+# --no-install-recommends : strict nécessaire ; on supprime ensuite les index apt.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends procps \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd --system --gid 10001 app \
+ && useradd  --system --uid 10001 --gid app --no-create-home \
+             --shell /usr/sbin/nologin app
+
+COPY --from=builder /opt/venv /opt/venv
+
+WORKDIR /app
+COPY --chown=app:app app/ ./app/
+
+USER app
+
+# Valeurs par défaut NON sensibles ; elles sont écrasées à l'exécution
+# (docker run -e ... ou docker compose). Aucun secret dans l'image.
+ENV METRICS_ENDPOINT=http://api:8000/metrics \
+    COLLECTION_INTERVAL=5 \
+    REQUEST_TIMEOUT=5
+
+# L'agent n'expose aucun port : pas de EXPOSE, pas de HEALTHCHECK HTTP.
+CMD ["python", "-m", "app.agent"]

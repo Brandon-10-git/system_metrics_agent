@@ -1,0 +1,8 @@
+# Dépendances pour développer et tester (JAMAIS installées dans les images de production)
+-r requirements-api.txt
+-r requirements-agent.txt
+pytest==9.1.1
+pytest-cov==7.1.0
+# Requis par fastapi.testclient.TestClient (Starlette 1.x recommande httpx2 à la place de httpx).
+# Conservé depuis le dépôt d'origine, mais figé sur une version précise.
+httpx2==2.13.1

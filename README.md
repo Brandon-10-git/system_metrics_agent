@@ -1,46 +1,18 @@
-# System Metrics Agent
-
-Un agent Python modulaire capable de collecter les métriques système,
-de les formater et de les transmettre en temps réel vers une API ou un
-Webhook externe.
-
-## Fonctionnalités
-
-- Collecte du pourcentage CPU.
-- Collecte de la mémoire RAM totale, utilisée et disponible.
-- Utilisation de `psutil`.
-- Utilisation de **`subprocess`** pour exécuter la commande système
-  `uptime` et récupérer la charge système.
-- Architecture modulaire :
-  - `collector.py` : collecte ;
-  - `formatter.py` : normalisation du payload ;
-  - `sender.py` : envoi HTTP ;
-  - `agent.py` : orchestration ;
-  - `api.py` : API de réception avec **FastAPI**.
-- Configuration externe avec `.env`.
-- Gestion des erreurs réseau et des erreurs de collecte.
-- Tests automatisés avec `pytest`.
 
 ## Architecture
 
 ```text
 system_metrics_agent/
-├── app/
-│   ├── __init__.py
-│   ├── agent.py
-│   ├── api.py
-│   ├── collector.py
-│   ├── config.py
-│   ├── formatter.py
-│   └── sender.py
-├── tests/
-│   ├── test_api.py
-│   ├── test_collector.py
-│   ├── test_formatter.py
-│   └── test_sender.py
-├── .env.example
-├── requirements.txt
-└── README.md
+├── app/                      # code applicatif (agent + API)
+│   ├── agent.py  api.py  collector.py  config.py  formatter.py  sender.py
+├── tests/                    # tests pytest (test_api, agent, collector, config, formatter, sender)
+├── .github/workflows/ci-cd.yml   # pipeline CI/CD
+├── Dockerfile.api  Dockerfile.agent  .dockerignore
+├── docker-compose.yml        # lancement local complet
+├── docker-compose.sonarqube.yml  # (bonus) SonarQube local
+├── sonar-project.properties
+├── requirements-api.txt  requirements-agent.txt  requirements-dev.txt  requirements.txt
+└── .env.example
 ```
 
 ## Installation
@@ -66,7 +38,7 @@ Windows :
 Installer les dépendances :
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-dev.txt   # API + agent + outils de test
 ```
 
 Créer le fichier de configuration :
@@ -192,18 +164,6 @@ pip install pytest-cov
 pytest --cov=app --cov-report=term-missing
 ```
 
-## Robustesse
-
-Le projet gère notamment :
-
-- les erreurs d'exécution de `subprocess` ;
-- les timeouts ;
-- les erreurs de connexion HTTP ;
-- les réponses HTTP en erreur ;
-- les configurations invalides ;
-- les payloads incomplets ;
-- l'absence de métriques dans l'API.
-
 ## Démonstration du flux
 
 ```text
@@ -237,3 +197,5 @@ Le projet gère notamment :
 │ /metrics         │
 └──────────────────┘
 ```
+
+
