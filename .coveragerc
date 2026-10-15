@@ -1,0 +1,12 @@
+# Configuration de la couverture de code.
+# Objectif : que coverage.xml contienne des chemins relatifs à la RACINE du dépôt
+# (app/agent.py et non agent.py), sinon SonarQube ne retrouve pas les fichiers
+# et affiche 0 % de couverture.
+[run]
+source = .
+relative_files = True
+omit =
+    tests/*
+    scripts/*
+    .venv/*
+    venv/*

@@ -43,8 +43,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
+      # La configuration est dans .coveragerc (source = ., chemins relatifs, tests exclus) :
+      # coverage.xml contient ainsi "app/agent.py", chemin que SonarQube sait retrouver.
       - name: Tests + couverture (coverage.xml)
-        run: pytest -q --cov=app --cov-report=xml --cov-report=term-missing
+        run: pytest -q --cov=. --cov-report=xml --cov-report=term-missing
 
       - name: Analyse SonarQube
         uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
